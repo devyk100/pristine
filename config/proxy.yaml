@@ -1,0 +1,26 @@
+# Reverse Proxy Configuration
+http_port: 9080
+https_port: 9443
+email: "admin@example.com"  # Email for Let's Encrypt registration
+
+# Global settings
+timeout_seconds: 30
+max_connections: 1000
+
+# Site configurations
+sites:
+  - domain: "example.com"
+    backend: "127.0.0.1:9999"
+    tls: auto  # auto, manual, or off
+  - domain: "api.example.com"
+    backend: "127.0.0.1:8080"
+    tls: auto
+  - domain: "ws.example.com"
+    backend: "127.0.0.1:9000"
+    tls: auto
+    websocket: true
+
+# Certificate storage
+cert_dir: "./certs"
+acme_server: "https://acme-v02.api.letsencrypt.org/directory"  # Let's Encrypt production
+# acme_server: "https://acme-staging-v02.api.letsencrypt.org/directory"  # Let's Encrypt staging

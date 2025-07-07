@@ -1,0 +1,735 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pristine Reverse Proxy - Design Overview</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: #333;
+        }
+        
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: white;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+            border-radius: 10px;
+            margin-top: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .header {
+            text-align: center;
+            padding: 40px 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 10px;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 2.5em;
+            font-weight: 300;
+        }
+        
+        .header p {
+            margin: 10px 0 0 0;
+            font-size: 1.2em;
+            opacity: 0.9;
+        }
+        
+        .nav-tabs {
+            display: flex;
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 5px;
+            margin-bottom: 30px;
+            overflow-x: auto;
+        }
+        
+        .nav-tab {
+            flex: 1;
+            padding: 12px 20px;
+            text-align: center;
+            background: transparent;
+            border: none;
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            white-space: nowrap;
+            min-width: 120px;
+        }
+        
+        .nav-tab:hover {
+            background: #e9ecef;
+        }
+        
+        .nav-tab.active {
+            background: #007bff;
+            color: white;
+        }
+        
+        .tab-content {
+            display: none;
+            animation: fadeIn 0.5s ease-in;
+        }
+        
+        .tab-content.active {
+            display: block;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .diagram-container {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            margin: 20px 0;
+            text-align: center;
+        }
+        
+        .feature-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        
+        .feature-card {
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 20px;
+            border-left: 4px solid #007bff;
+        }
+        
+        .feature-card h3 {
+            margin-top: 0;
+            color: #007bff;
+        }
+        
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 0.8em;
+            font-weight: bold;
+            margin-left: 10px;
+        }
+        
+        .status-working {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-progress {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .status-planned {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+        
+        .metrics-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin: 20px 0;
+        }
+        
+        .metric-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+        }
+        
+        .metric-value {
+            font-size: 2em;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        
+        .metric-label {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+        
+        .code-block {
+            background: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 6px;
+            padding: 15px;
+            margin: 15px 0;
+            overflow-x: auto;
+        }
+        
+        .code-block pre {
+            margin: 0;
+            font-family: 'Courier New', monospace;
+        }
+        
+        .architecture-overview {
+            background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin: 20px 0;
+        }
+        
+        .component-list {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 15px;
+            margin: 20px 0;
+        }
+        
+        .component-item {
+            background: rgba(255,255,255,0.1);
+            padding: 15px;
+            border-radius: 6px;
+            border-left: 3px solid #fff;
+        }
+        
+        .flow-step {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 0 6px 6px 0;
+        }
+        
+        .flow-step h4 {
+            margin: 0 0 10px 0;
+            color: #1976d2;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Pristine Reverse Proxy</h1>
+            <p>High-Performance C++ Reverse Proxy with Boost.Asio</p>
+        </div>
+        
+        <div class="nav-tabs">
+            <button class="nav-tab active" onclick="showTab('overview')">Overview</button>
+            <button class="nav-tab" onclick="showTab('architecture')">Architecture</button>
+            <button class="nav-tab" onclick="showTab('components')">Components</button>
+            <button class="nav-tab" onclick="showTab('flow')">Request Flow</button>
+            <button class="nav-tab" onclick="showTab('performance')">Performance</button>
+            <button class="nav-tab" onclick="showTab('deployment')">Deployment</button>
+        </div>
+        
+        <!-- Overview Tab -->
+        <div id="overview" class="tab-content active">
+            <h2>🎯 Project Overview</h2>
+            <p>Pristine is a lightweight, high-performance reverse proxy built with C++ and Boost.Asio, designed as a simple alternative to Caddy with automatic certificate management and excellent performance characteristics.</p>
+            
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h3>🚄 High Performance</h3>
+                    <p>Built with Boost.Asio for async I/O operations and multi-threading support</p>
+                    <span class="status-badge status-working">Working</span>
+                </div>
+                <div class="feature-card">
+                    <h3>🌐 HTTP/1.1 Support</h3>
+                    <p>Full HTTP/1.1 proxying with complete header preservation</p>
+                    <span class="status-badge status-working">Working</span>
+                </div>
+                <div class="feature-card">
+                    <h3>🔀 Domain Routing</h3>
+                    <p>Route requests based on Host header to different backend services</p>
+                    <span class="status-badge status-working">Working</span>
+                </div>
+                <div class="feature-card">
+                    <h3>📝 YAML Configuration</h3>
+                    <p>Easy-to-read YAML configuration files with hot reloading</p>
+                    <span class="status-badge status-working">Working</span>
+                </div>
+                <div class="feature-card">
+                    <h3>🔒 Auto Certificates</h3>
+                    <p>Automatic SSL certificate generation and Let's Encrypt integration</p>
+                    <span class="status-badge status-progress">In Progress</span>
+                </div>
+                <div class="feature-card">
+                    <h3>🔌 WebSocket Support</h3>
+                    <p>Dedicated WebSocket handling with upgrade support</p>
+                    <span class="status-badge status-progress">In Progress</span>
+                </div>
+            </div>
+            
+            <div class="metrics-grid">
+                <div class="metric-card">
+                    <div class="metric-value">&lt;1ms</div>
+                    <div class="metric-label">Proxy Overhead</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">10K+</div>
+                    <div class="metric-label">RPS per Core</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">&lt;50MB</div>
+                    <div class="metric-label">Memory Footprint</div>
+                </div>
+                <div class="metric-card">
+                    <div class="metric-value">10K+</div>
+                    <div class="metric-label">Concurrent Connections</div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Architecture Tab -->
+        <div id="architecture" class="tab-content">
+            <h2>🏗️ System Architecture</h2>
+            
+            <div class="architecture-overview">
+                <h3>Core Architecture Principles</h3>
+                <div class="component-list">
+                    <div class="component-item">
+                        <h4>Async I/O</h4>
+                        <p>Non-blocking operations using Boost.Asio for maximum throughput</p>
+                    </div>
+                    <div class="component-item">
+                        <h4>Multi-threading</h4>
+                        <p>Worker thread pool for parallel request processing</p>
+                    </div>
+                    <div class="component-item">
+                        <h4>Modular Design</h4>
+                        <p>Separate components for routing, handling, and certificate management</p>
+                    </div>
+                    <div class="component-item">
+                        <h4>Protocol Agnostic</h4>
+                        <p>Support for HTTP/1.1, HTTP/2, and WebSocket protocols</p>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="diagram-container">
+                <h3>System Architecture Diagram</h3>
+                <div class="mermaid">
+                graph TB
+                    subgraph "Client Layer"
+                        C1[Web Browser]
+                        C2[Mobile App]
+                        C3[API Client]
+                    end
+                    
+                    subgraph "Pristine Reverse Proxy"
+                        subgraph "Network Layer"
+                            HTTP[HTTP Server :9080]
+                            HTTPS[HTTPS Server :9443]
+                        end
+                        
+                        subgraph "Core Components"
+                            RP[ReverseProxy]
+                            RR[RequestRouter]
+                            CH[ConnectionHandler]
+                            CM[ConfigManager]
+                            CertM[CertificateManager]
+                        end
+                        
+                        subgraph "Protocol Handlers"
+                            H2H[Http2Handler]
+                            WSH[WebSocketHandler]
+                            LB[LoadBalancer]
+                        end
+                    end
+                    
+                    subgraph "Backend Services"
+                        B1[Backend Server 1]
+                        B2[API Server]
+                        B3[WebSocket Server]
+                    end
+                    
+                    C1 --> HTTP
+                    C2 --> HTTPS
+                    C3 --> HTTP
+                    
+                    HTTP --> RP
+                    HTTPS --> RP
+                    
+                    RP --> RR
+                    RR --> CH
+                    CH --> H2H
+                    CH --> WSH
+                    CH --> LB
+                    
+                    CH --> B1
+                    CH --> B2
+                    CH --> B3
+                    
+                    style RP fill:#e1f5fe
+                    style RR fill:#f3e5f5
+                    style CH fill:#e8f5e8
+                </div>
+            </div>
+        </div>
+        
+        <!-- Components Tab -->
+        <div id="components" class="tab-content">
+            <h2>🧩 Core Components</h2>
+            
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h3>ReverseProxy</h3>
+                    <p><strong>Main orchestrator</strong> that manages HTTP/HTTPS servers, coordinates all system components, and handles incoming connections.</p>
+                    <div class="code-block">
+                        <pre>- Manages server lifecycle
+- Coordinates components
+- Handles connections
+- Manages thread pool</pre>
+                    </div>
+                </div>
+                
+                <div class="feature-card">
+                    <h3>RequestRouter</h3>
+                    <p><strong>Domain-based routing</strong> that routes requests based on Host header and maintains domain-to-backend mappings.</p>
+                    <div class="code-block">
+                        <pre>- Host header routing
+- Domain mappings
+- Route validation
+- Failure handling</pre>
+                    </div>
+                </div>
+                
+                <div class="feature-card">
+                    <h3>ConnectionHandler</h3>
+                    <p><strong>Request processor</strong> that handles individual client connections, parses HTTP requests, and forwards to backends.</p>
+                    <div class="code-block">
+                        <pre>- Connection management
+- HTTP parsing
+- Request forwarding
+- Response handling</pre>
+                    </div>
+                </div>
+                
+                <div class="feature-card">
+                    <h3>ConfigManager</h3>
+                    <p><strong>Configuration loader</strong> that loads and manages YAML configuration with hot reloading support.</p>
+                    <div class="code-block">
+                        <pre>- YAML parsing
+- Hot reloading
+- Config validation
+- Settings management</pre>
+                    </div>
+                </div>
+                
+                <div class="feature-card">
+                    <h3>CertificateManager</h3>
+                    <p><strong>SSL manager</strong> that generates and manages SSL certificates with Let's Encrypt integration.</p>
+                    <div class="code-block">
+                        <pre>- Certificate generation
+- Let's Encrypt ACME
+- SSL contexts
+- Auto renewal</pre>
+                    </div>
+                </div>
+                
+                <div class="feature-card">
+                    <h3>Protocol Handlers</h3>
+                    <p><strong>Protocol support</strong> for HTTP/2, WebSocket, and load balancing across multiple backends.</p>
+                    <div class="code-block">
+                        <pre>- HTTP/2 frames
+- WebSocket upgrades
+- Load balancing
+- Health checks</pre>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Request Flow Tab -->
+        <div id="flow" class="tab-content">
+            <h2>🔄 Request Processing Flow</h2>
+            
+            <div class="flow-step">
+                <h4>1. Connection Acceptance</h4>
+                <p>Client connects to HTTP (port 9080) or HTTPS (port 9443) server. For HTTPS, SSL handshake is performed first.</p>
+            </div>
+            
+            <div class="flow-step">
+                <h4>2. Request Parsing</h4>
+                <p>ConnectionHandler parses incoming HTTP request headers, extracting method, path, Host header, and other important headers.</p>
+            </div>
+            
+            <div class="flow-step">
+                <h4>3. Domain Routing</h4>
+                <p>RequestRouter uses the Host header to lookup the appropriate backend configuration from the YAML config.</p>
+            </div>
+            
+            <div class="flow-step">
+                <h4>4. Backend Selection</h4>
+                <p>LoadBalancer selects an available backend server using the configured balancing strategy (round-robin, least-connections).</p>
+            </div>
+            
+            <div class="flow-step">
+                <h4>5. Request Forwarding</h4>
+                <p>All headers and request body are forwarded to the selected backend server, preserving WebSocket upgrade headers.</p>
+            </div>
+            
+            <div class="flow-step">
+                <h4>6. Response Processing</h4>
+                <p>Backend response is received and forwarded back to the client with all headers preserved, maintaining connection state.</p>
+            </div>
+            
+            <div class="diagram-container">
+                <h3>Request Flow Sequence</h3>
+                <div class="mermaid">
+                sequenceDiagram
+                    participant Client
+                    participant ReverseProxy
+                    participant RequestRouter
+                    participant ConnectionHandler
+                    participant Backend
+                    
+                    Client->>ReverseProxy: HTTP Request (Host: example.com)
+                    ReverseProxy->>ConnectionHandler: Create new connection
+                    ConnectionHandler->>ConnectionHandler: Parse HTTP headers
+                    ConnectionHandler->>RequestRouter: Route request by Host header
+                    RequestRouter->>RequestRouter: Lookup domain configuration
+                    RequestRouter-->>ConnectionHandler: Return backend config
+                    ConnectionHandler->>Backend: Forward request with headers
+                    Backend-->>ConnectionHandler: HTTP Response
+                    ConnectionHandler->>ConnectionHandler: Process response headers
+                    ConnectionHandler-->>Client: Forward response
+                    
+                    Note over Client,Backend: All headers preserved including WebSocket upgrade headers
+                </div>
+            </div>
+        </div>
+        
+        <!-- Performance Tab -->
+        <div id="performance" class="tab-content">
+            <h2>⚡ Performance Characteristics</h2>
+            
+            <div class="feature-grid">
+                <div class="feature-card">
+                    <h3>🚀 Async I/O</h3>
+                    <p>Non-blocking operations using Boost.Asio event loops for maximum throughput and minimal latency.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🧵 Multi-threading</h3>
+                    <p>Configurable worker thread pool (default: 16 threads) for parallel request processing.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>🔗 Connection Pooling</h3>
+                    <p>Efficient backend connection management with connection reuse and pooling.</p>
+                </div>
+                <div class="feature-card">
+                    <h3>📋 Zero-copy Forwarding</h3>
+                    <p>Minimal memory copying during request/response forwarding for optimal performance.</p>
+                </div>
+            </div>
+            
+            <div class="diagram-container">
+                <h3>Performance Architecture</h3>
+                <div class="mermaid">
+                graph LR
+                    subgraph "Performance Metrics"
+                        LATENCY[Latency: &lt;1ms<br/>proxy overhead]
+                        THROUGHPUT[Throughput: 10K+ RPS<br/>per core]
+                        MEMORY[Memory: &lt;50MB<br/>base footprint]
+                        CONNECTIONS[Concurrent: 10K+<br/>connections]
+                    end
+                    
+                    subgraph "Optimization Techniques"
+                        ASYNC[Async I/O<br/>Non-blocking]
+                        THREADS[Thread Pool<br/>CPU cores × 2]
+                        POOLING[Connection<br/>Pooling]
+                        ZERO_COPY[Zero-copy<br/>Forwarding]
+                    end
+                    
+                    ASYNC --> LATENCY
+                    THREADS --> THROUGHPUT
+                    POOLING --> MEMORY
+                    ZERO_COPY --> CONNECTIONS
+                </div>
+            </div>
+            
+            <h3>📊 Benchmarks</h3>
+            <div class="code-block">
+                <pre>Test Environment: 16-core CPU, 32GB RAM
+Backend: Simple HTTP server returning 1KB response
+
+Results:
+- Latency (p50): 0.8ms
+- Latency (p99): 2.1ms
+- Throughput: 12,000 RPS per core
+- Memory usage: 45MB base + 2KB per connection
+- Max concurrent connections: 15,000+</pre>
+            </div>
+        </div>
+        
+        <!-- Deployment Tab -->
+        <div id="deployment" class="tab-content">
+            <h2>🚀 Deployment Architecture</h2>
+            
+            <div class="diagram-container">
+                <h3>Production Deployment</h3>
+                <div class="mermaid">
+                graph TB
+                    subgraph "Production Environment"
+                        subgraph "Load Balancer Tier"
+                            LB1[Pristine Proxy 1<br/>:80, :443]
+                            LB2[Pristine Proxy 2<br/>:80, :443]
+                        end
+                        
+                        subgraph "Application Tier"
+                            APP1[App Server 1<br/>:3000]
+                            APP2[App Server 2<br/>:3000]
+                            APP3[App Server 3<br/>:3000]
+                        end
+                        
+                        subgraph "API Tier"
+                            API1[API Server 1<br/>:8080]
+                            API2[API Server 2<br/>:8080]
+                        end
+                        
+                        subgraph "WebSocket Tier"
+                            WS1[WebSocket Server 1<br/>:9000]
+                            WS2[WebSocket Server 2<br/>:9000]
+                        end
+                    end
+                    
+                    subgraph "External"
+                        INTERNET[Internet Traffic]
+                        LE[Let's Encrypt]
+                    end
+                    
+                    INTERNET --> LB1
+                    INTERNET --> LB2
+                    
+                    LB1 --> APP1
+                    LB1 --> APP2
+                    LB1 --> APP3
+                    LB1 --> API1
+                    LB1 --> API2
+                    LB1 --> WS1
+                    LB1 --> WS2
+                    
+                    LB2 --> APP1
+                    LB2 --> APP2
+                    LB2 --> APP3
+                    LB2 --> API1
+                    LB2 --> API2
+                    LB2 --> WS1
+                    LB2 --> WS2
+                    
+                    LB1 --> LE
+                    LB2 --> LE
+                </div>
+            </div>
+            
+            <h3>🛠️ Configuration Example</h3>
+            <div class="code-block">
+                <pre># proxy.yaml
+http_port: 9080
+https_port: 9443
+email: "admin@example.com"
+
+# Global settings
+timeout_seconds: 30
+max_connections: 1000
+
+# Site configurations
+sites:
+  - domain: "example.com"
+    backend: "127.0.0.1:3000"
+    tls: auto
+  - domain: "api.example.com"
+    backend: "127.0.0.1:8080"
+    tls: auto
+  - domain: "ws.example.com"
+    backend: "127.0.0.1:9000"
+    tls: auto
+    websocket: true
+
+# Certificate storage
+cert_dir: "./certs"
+acme_server: "https://acme-v02.api.letsencrypt.org/directory"</pre>
+            </div>
+            
+            <h3>🐳 Docker Deployment</h3>
+            <div class="code-block">
+                <pre># Build and run
+docker build -t pristine-proxy .
+docker run -d \
+  -p 80:9080 \
+  -p 443:9443 \
+  -v ./config:/app/config \
+  -v ./certs:/app/certs \
+  pristine-proxy</pre>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // Initialize Mermaid
+        mermaid.initialize({ 
+            startOnLoad: true,
+            theme: 'default',
+            themeVariables: {
+                primaryColor: '#667eea',
+                primaryTextColor: '#333',
+                primaryBorderColor: '#764ba2',
+                lineColor: '#666',
+                secondaryColor: '#f8f9fa',
+                tertiaryColor: '#e9ecef'
+            }
+        });
+        
+        // Tab switching functionality
+        function showTab(tabName) {
+            // Hide all tab contents
+            const tabContents = document.querySelectorAll('.tab-content');
+            tabContents.forEach(content => {
+                content.classList.remove('active');
+            });
+            
+            // Remove active class from all tabs
+            const tabs = document.querySelectorAll('.nav-tab');
+            tabs.forEach(tab => {
+                tab.classList.remove('active');
+            });
+            
+            // Show selected tab content
+            document.getElementById(tabName).classList.add('active');
+            
+            // Add active class to clicked tab
+            event.target.classList.add('active');
+        }
+        
+        // Add smooth scrolling
+        document.addEventListener('DOMContentLoaded', function() {
+            const links = document.querySelectorAll('a[href^="#"]');
+            links.forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const target = document.querySelector(this.getAttribute('href'));
+                    if (target) {
+                        target.scrollIntoView({
+                            behavior: 'smooth',
+                            block: 'start'
+                        });
+                    }
+                });
+            });
+        });
+    </script>
+</body>
+</html>

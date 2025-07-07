@@ -1,0 +1,537 @@
+@startuml Pristine_Reverse_Proxy_Architecture
+
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam componentStyle rectangle
+
+title Pristine Reverse Proxy - Technical Architecture
+
+package "Client Layer" {
+    [Web Browser] as WB
+    [Mobile App] as MA
+    [API Client] as AC
+    [WebSocket Client] as WSC
+}
+
+package "Pristine Reverse Proxy" {
+    package "Network Layer" {
+        [HTTP Server :9080] as HTTP
+        [HTTPS Server :9443] as HTTPS
+    }
+    
+    package "Core Components" {
+        [ReverseProxy] as RP
+        [RequestRouter] as RR
+        [ConnectionHandler] as CH
+        [ConfigManager] as CM
+        [CertificateManager] as CertM
+    }
+    
+    package "Protocol Handlers" {
+        [Http2Handler] as H2H
+        [WebSocketHandler] as WSH
+        [LoadBalancer] as LB
+    }
+    
+    package "Configuration & Storage" {
+        database "proxy.yaml" as YAML
+        database "SSL Certificates" as CERTS
+        database "Connection Pool" as POOL
+    }
+}
+
+package "Backend Services" {
+    [Backend Server 1\n:3000] as B1
+    [API Server\n:8080] as B2
+    [WebSocket Server\n:9000] as B3
+}
+
+' Client connections
+WB --> HTTP
+MA --> HTTPS
+AC --> HTTP
+WSC --> HTTPS
+
+' Internal connections
+HTTP --> RP
+HTTPS --> RP
+RP --> RR
+RP --> CM
+RP --> CertM
+RR --> CH
+CH --> H2H
+CH --> WSH
+CH --> LB
+
+' Configuration
+CM --> YAML
+CertM --> CERTS
+CH --> POOL
+
+' Backend connections
+CH --> B1
+CH --> B2
+CH --> B3
+
+@enduml
+
+@startuml Connection_Handler_State_Machine
+
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Connection Handler State Machine
+
+[*] --> Idle
+
+Idle --> Accepting : New Connection
+Accepting --> SSL_Handshake : HTTPS Request
+Accepting --> Reading_Headers : HTTP Request
+
+SSL_Handshake --> Reading_Headers : Handshake Success
+SSL_Handshake --> Error : Handshake Failed
+
+Reading_Headers --> Parsing_Request : Headers Complete
+Reading_Headers --> Error : Invalid Headers
+
+Parsing_Request --> Routing : Request Parsed
+Parsing_Request --> Error : Parse Error
+
+Routing --> Backend_Connect : Route Found
+Routing --> Error_404 : Route Not Found
+
+Backend_Connect --> Forwarding : Connection Success
+Backend_Connect --> Error_502 : Connection Failed
+
+Forwarding --> Reading_Response : Request Sent
+Reading_Response --> Sending_Response : Response Received
+
+Sending_Response --> Keep_Alive : HTTP/1.1 Keep-Alive
+Sending_Response --> Closing : Connection Close
+
+Keep_Alive --> Reading_Headers : Next Request
+Keep_Alive --> Closing : Timeout
+
+Error --> Closing
+Error_404 --> Closing
+Error_502 --> Closing
+Closing --> [*]
+
+@enduml
+
+@startuml HTTP_Request_Sequence
+
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title HTTP Request Processing Sequence
+
+actor Client
+participant "ReverseProxy" as RP
+participant "ConnectionHandler" as CH
+participant "RequestRouter" as RR
+participant "LoadBalancer" as LB
+participant "Backend" as BE
+
+Client -> RP : HTTP Request\n(Host: example.com)
+activate RP
+
+RP -> CH : Create Connection Handler
+activate CH
+
+CH -> CH : Parse HTTP Headers
+CH -> RR : Route Request by Host
+activate RR
+
+RR -> RR : Lookup Domain Config
+RR --> CH : Backend Configuration
+deactivate RR
+
+CH -> LB : Select Backend Server
+activate LB
+LB --> CH : Backend Server Info
+deactivate LB
+
+CH -> BE : Forward Request + Headers
+activate BE
+
+BE --> CH : HTTP Response
+deactivate BE
+
+CH -> CH : Process Response Headers
+CH --> Client : Forward Response
+deactivate CH
+deactivate RP
+
+note over Client, BE : All headers preserved\nincluding WebSocket upgrade headers
+
+@enduml
+
+@startuml Certificate_Management_Sequence
+
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Certificate Management Flow
+
+actor Client
+participant "ReverseProxy" as RP
+participant "CertificateManager" as CM
+participant "Let's Encrypt" as LE
+participant "File System" as FS
+
+Client -> RP : HTTPS Request\n(SNI: example.com)
+activate RP
+
+RP -> CM : Get SSL Context for Domain
+activate CM
+
+alt Certificate Exists
+    CM -> FS : Load Certificate
+    FS --> CM : Certificate Data
+    CM --> RP : SSL Context
+else Certificate Missing
+    CM -> CM : Generate Self-Signed
+    CM -> FS : Store Certificate
+    CM --> RP : Temporary SSL Context
+    
+    CM -> LE : Request Certificate\n(ACME Protocol)
+    activate LE
+    LE --> CM : Challenge
+    CM -> CM : Complete Challenge
+    CM -> LE : Challenge Response
+    LE --> CM : Signed Certificate
+    deactivate LE
+    
+    CM -> FS : Store Production Certificate
+    CM -> CM : Update SSL Context
+end
+
+deactivate CM
+
+RP -> RP : SSL Handshake
+RP --> Client : Encrypted Connection
+deactivate RP
+
+@enduml
+
+@startuml Class_Relationships
+
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Detailed Class Relationships
+
+class ReverseProxy {
+    - io_context& io_context_
+    - ConfigManager config_manager_
+    - RequestRouter router_
+    - CertificateManager cert_manager_
+    - tcp::acceptor http_acceptor_
+    - tcp::acceptor https_acceptor_
+    - ssl::context ssl_context_
+    - std::vector<std::thread> worker_threads_
+    + ReverseProxy(config_path: string)
+    + start(): void
+    + stop(): void
+    + reload_config(): void
+    - accept_http_connections(): void
+    - accept_https_connections(): void
+    - handle_accept(error: error_code): void
+}
+
+class RequestRouter {
+    - std::map<string, SiteConfig> sites_
+    - std::mutex sites_mutex_
+    + RequestRouter(config: ProxyConfig)
+    + route_request(host: string): optional<SiteConfig>
+    + add_site(domain: string, config: SiteConfig): void
+    + remove_site(domain: string): void
+    + update_site(domain: string, config: SiteConfig): void
+    + get_all_sites(): vector<string>
+}
+
+class ConnectionHandler {
+    - tcp::socket socket_
+    - ssl::stream<tcp::socket> ssl_socket_
+    - RequestRouter& router_
+    - std::string request_buffer_
+    - std::string response_buffer_
+    - HttpRequest current_request_
+    - HttpResponse current_response_
+    + ConnectionHandler(socket: tcp::socket, router: RequestRouter&)
+    + start(): void
+    + handle_request(): void
+    + close(): void
+    - parse_http_request(): bool
+    - forward_to_backend(): void
+    - send_response(): void
+    - handle_websocket_upgrade(): void
+}
+
+class ConfigManager {
+    - std::string config_path_
+    - ProxyConfig config_
+    - std::mutex config_mutex_
+    - file_watcher watcher_
+    + ConfigManager(path: string)
+    + load_config(): ProxyConfig
+    + reload_config(): void
+    + validate_config(): bool
+    + get_config(): ProxyConfig
+    - parse_yaml(): ProxyConfig
+    - watch_config_file(): void
+}
+
+class CertificateManager {
+    - std::string cert_dir_
+    - std::map<string, ssl::context> ssl_contexts_
+    - std::mutex contexts_mutex_
+    - AcmeClient acme_client_
+    + CertificateManager(cert_dir: string)
+    + get_ssl_context(domain: string): ssl::context&
+    + generate_self_signed(domain: string): void
+    + request_lets_encrypt(domain: string): void
+    + load_certificate(domain: string): bool
+    + renew_certificate(domain: string): void
+    - create_ssl_context(cert_path: string, key_path: string): ssl::context
+}
+
+class Http2Handler {
+    - ConnectionHandler& connection_
+    - Http2Session session_
+    - std::map<int, Http2Stream> streams_
+    + Http2Handler(connection: ConnectionHandler&)
+    + handle_http2_request(): void
+    + send_http2_response(): void
+    + handle_settings_frame(): void
+    + handle_data_frame(): void
+    - parse_http2_frame(): Http2Frame
+    - send_http2_frame(frame: Http2Frame): void
+}
+
+class WebSocketHandler {
+    - ConnectionHandler& connection_
+    - WebSocketState state_
+    - std::string websocket_key_
+    + WebSocketHandler(connection: ConnectionHandler&)
+    + handle_websocket_upgrade(): bool
+    + forward_websocket_data(): void
+    + send_websocket_frame(data: string): void
+    - validate_websocket_headers(): bool
+    - generate_accept_key(): string
+    - parse_websocket_frame(): WebSocketFrame
+}
+
+class LoadBalancer {
+    - std::vector<BackendServer> backends_
+    - BalancingStrategy strategy_
+    - std::atomic<size_t> round_robin_index_
+    - HealthChecker health_checker_
+    + LoadBalancer(backends: vector<BackendServer>)
+    + select_backend(): optional<BackendServer>
+    + add_backend(server: BackendServer): void
+    + remove_backend(server: BackendServer): void
+    + health_check(): void
+    + get_healthy_backends(): vector<BackendServer>
+    - round_robin_select(): BackendServer
+    - least_connections_select(): BackendServer
+}
+
+' Relationships
+ReverseProxy *-- ConfigManager
+ReverseProxy *-- RequestRouter
+ReverseProxy *-- CertificateManager
+ReverseProxy o-- ConnectionHandler : creates
+
+ConnectionHandler --> RequestRouter : uses
+ConnectionHandler o-- Http2Handler : creates
+ConnectionHandler o-- WebSocketHandler : creates
+ConnectionHandler --> LoadBalancer : uses
+
+RequestRouter --> ConfigManager : uses
+CertificateManager --> ConfigManager : uses
+
+@enduml
+
+@startuml Component_Interaction
+
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Component Interaction Diagram
+
+package "Network Layer" {
+    component [HTTP Acceptor] as HTTP_ACC
+    component [HTTPS Acceptor] as HTTPS_ACC
+    component [SSL Engine] as SSL_ENG
+}
+
+package "Request Processing" {
+    component [Connection Pool] as CONN_POOL
+    component [HTTP Parser] as HTTP_PARSER
+    component [Request Router] as REQ_ROUTER
+    component [Response Builder] as RESP_BUILDER
+}
+
+package "Protocol Handlers" {
+    component [HTTP/1.1 Handler] as HTTP1_HANDLER
+    component [HTTP/2 Handler] as HTTP2_HANDLER
+    component [WebSocket Handler] as WS_HANDLER
+}
+
+package "Backend Management" {
+    component [Load Balancer] as LOAD_BAL
+    component [Health Monitor] as HEALTH_MON
+    component [Connection Manager] as CONN_MGR
+}
+
+package "Configuration & Security" {
+    component [Config Loader] as CONFIG_LOAD
+    component [Certificate Manager] as CERT_MGR
+    component [ACME Client] as ACME_CLIENT
+}
+
+' Network flow
+HTTP_ACC --> CONN_POOL
+HTTPS_ACC --> SSL_ENG
+SSL_ENG --> CONN_POOL
+
+' Request processing flow
+CONN_POOL --> HTTP_PARSER
+HTTP_PARSER --> REQ_ROUTER
+REQ_ROUTER --> HTTP1_HANDLER
+REQ_ROUTER --> HTTP2_HANDLER
+REQ_ROUTER --> WS_HANDLER
+
+' Backend interaction
+HTTP1_HANDLER --> LOAD_BAL
+HTTP2_HANDLER --> LOAD_BAL
+WS_HANDLER --> LOAD_BAL
+LOAD_BAL --> CONN_MGR
+HEALTH_MON --> CONN_MGR
+
+' Response flow
+CONN_MGR --> RESP_BUILDER
+RESP_BUILDER --> CONN_POOL
+
+' Configuration
+CONFIG_LOAD --> REQ_ROUTER
+CONFIG_LOAD --> LOAD_BAL
+CERT_MGR --> SSL_ENG
+ACME_CLIENT --> CERT_MGR
+
+@enduml
+
+@startuml Deployment_Architecture
+
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Production Deployment Architecture
+
+cloud "Internet" {
+    actor Users
+}
+
+node "Load Balancer Tier" {
+    component [Pristine Proxy 1] as PP1
+    component [Pristine Proxy 2] as PP2
+    database "Shared Config" as CONFIG
+    database "Certificate Store" as CERT_STORE
+}
+
+node "Application Tier" {
+    component [App Server 1] as APP1
+    component [App Server 2] as APP2
+    component [App Server 3] as APP3
+}
+
+node "API Tier" {
+    component [API Server 1] as API1
+    component [API Server 2] as API2
+}
+
+node "WebSocket Tier" {
+    component [WS Server 1] as WS1
+    component [WS Server 2] as WS2
+}
+
+cloud "External Services" {
+    component [Let's Encrypt] as LE
+    component [DNS Provider] as DNS
+}
+
+' User connections
+Users --> PP1 : HTTPS/HTTP
+Users --> PP2 : HTTPS/HTTP
+
+' Proxy to backends
+PP1 --> APP1
+PP1 --> APP2
+PP1 --> APP3
+PP1 --> API1
+PP1 --> API2
+PP1 --> WS1
+PP1 --> WS2
+
+PP2 --> APP1
+PP2 --> APP2
+PP2 --> APP3
+PP2 --> API1
+PP2 --> API2
+PP2 --> WS1
+PP2 --> WS2
+
+' Configuration
+PP1 --> CONFIG
+PP2 --> CONFIG
+PP1 --> CERT_STORE
+PP2 --> CERT_STORE
+
+' External services
+CERT_STORE --> LE : ACME Protocol
+DNS --> Users
+
+@enduml
+
+@startuml Performance_Monitoring
+
+!theme plain
+skinparam backgroundColor #FFFFFF
+
+title Performance Monitoring & Metrics
+
+package "Metrics Collection" {
+    component [Request Counter] as REQ_COUNT
+    component [Latency Tracker] as LATENCY
+    component [Error Rate Monitor] as ERROR_MON
+    component [Connection Monitor] as CONN_MON
+}
+
+package "Health Checks" {
+    component [Backend Health] as BACKEND_HEALTH
+    component [SSL Certificate Monitor] as SSL_MON
+    component [Resource Monitor] as RESOURCE_MON
+}
+
+package "Alerting" {
+    component [Threshold Alerts] as ALERTS
+    component [Log Aggregator] as LOG_AGG
+    component [Metrics Exporter] as METRICS_EXP
+}
+
+' Data flow
+REQ_COUNT --> METRICS_EXP
+LATENCY --> METRICS_EXP
+ERROR_MON --> ALERTS
+CONN_MON --> RESOURCE_MON
+
+BACKEND_HEALTH --> ALERTS
+SSL_MON --> ALERTS
+RESOURCE_MON --> LOG_AGG
+
+METRICS_EXP --> LOG_AGG
+LOG_AGG --> ALERTS
+
+@enduml
