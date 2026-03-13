@@ -1,6 +1,6 @@
 # Reverse Proxy Configuration
-http_port: 9080
-https_port: 9443
+http_port: 19080
+https_port: 19443
 email: "admin@example.com"  # Email for Let's Encrypt registration
 
 # Global settings

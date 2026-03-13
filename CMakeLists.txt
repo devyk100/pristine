@@ -36,3 +36,12 @@ target_link_libraries(${PROJECT_NAME}
 
 # Compiler flags
 target_compile_options(${PROJECT_NAME} PRIVATE -Wall -Wextra -O2)
+
+# Standalone C++ backend for load testing
+add_executable(TestBackend
+    test/TestBackend.cpp
+)
+target_link_libraries(TestBackend
+    ${Boost_LIBRARIES}
+    pthread
+)

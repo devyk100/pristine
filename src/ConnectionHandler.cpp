@@ -190,7 +190,8 @@ void ConnectionHandler::handle_websocket_upgrade() {
                     // Upgrade backend connection to WebSocket
                     self->backend_ws_stream_->async_handshake(
                         self->extract_host_from_request(),
-                        self->req_.target().to_string(),
+                        // self->req_.target().to_string(),
+                        std::string(self->req_.target()),
                         [self](beast::error_code ec) {
                             if (ec) {
                                 std::cerr << "WebSocket backend handshake error: " << ec.message() << std::endl;
@@ -245,7 +246,8 @@ void ConnectionHandler::close_connection() {
 std::string ConnectionHandler::extract_host_from_request() {
     auto host_it = req_.find(http::field::host);
     if (host_it != req_.end()) {
-        std::string host = host_it->value().to_string();
+        // std::string host = host_it->value().to_string();
+        std::string host = std::string(host_it->value());
         // Remove port if present
         size_t colon_pos = host.find(':');
         if (colon_pos != std::string::npos) {
